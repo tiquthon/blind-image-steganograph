@@ -11,3 +11,10 @@ keywords = ["blind", "image", "steganography"]
 publish = false
 
 [dependencies]
+image = { version = "0.24", default-features = false, features = ["jpeg"] }
+thiserror = "1"
+typed-builder = "0.18"
+webp = "0.2"
+
+[dev-dependencies]
+temp-dir = "0.1.12"
