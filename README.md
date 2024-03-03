@@ -9,6 +9,14 @@ With "Blind Image Steganograph" you can hide text or arbitrary files within an i
 You are free to copy, modify, and distribute "Blind Image Steganograph" with attribution under the terms of the MIT license.
 See the [LICENSE file](./LICENSE) for details.
 
+# Develop The Project
+
+Before developing "Blind Image Steganograph" you need:
+- [Rust](https://www.rust-lang.org/) Toolchain with clippy and cargo fmt
+- *for checking dependencies:*
+  - *either* [Cargo Audit](https://crates.io/crates/cargo-audit), install with `cargo install cargo-audit --locked`
+  - *or* [Cargo Deny](https://crates.io/crates/cargo-deny), install with `cargo install cargo-deny --locked`
+
 ## Git Hook
 
 There is a Git Hook inside [githooks/](./githooks/) helping you providing good code quality.
