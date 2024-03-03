@@ -1,0 +1,227 @@
+#!/usr/bin/env sh
+
+# Check if stdout is a terminal…
+# (Copied from https://unix.stackexchange.com/a/10065 )
+if test -t 1; then
+	ncolors=$(tput colors)
+	if test -n "$ncolors" && test $ncolors -ge 8; then
+		c1_bold="$(tput bold)"
+        c1_underline="$(tput smul)"
+        c1_standout="$(tput smso)"
+        c1_normal="$(tput sgr0)"
+        c1_black="$(tput setaf 0)"
+        c1_red="$(tput setaf 1)"
+        c1_green="$(tput setaf 2)"
+        c1_yellow="$(tput setaf 3)"
+        c1_blue="$(tput setaf 4)"
+        c1_magenta="$(tput setaf 5)"
+        c1_cyan="$(tput setaf 6)"
+        c1_white="$(tput setaf 7)"
+		# (Copied from https://unix.stackexchange.com/a/174 )
+		c2_nc='\e[0m' # No Color
+		c2_black='\e[0;30m'
+		c2_gray='\e[1;30m'
+		c2_red='\e[0;31m'
+		c2_light_red='\e[1;31m'
+		c2_green='\e[0;32m'
+		c2_light_green='\e[1;32m'
+		c2_brown='\e[0;33m'
+		c2_yellow='\e[1;33m'
+		c2_blue='\e[0;34m'
+		c2_light_blue='\e[1;34m'
+		c2_purple='\e[0;35m'
+		c2_light_purple='\e[1;35m'
+		c2_cyan='\e[0;36m'
+		c2_light_cyan='\e[1;36m'
+		c2_light_gray='\e[0;37m'
+		c2_white='\e[1;37m'
+	fi
+fi
+
+function stash {
+	echo "${c1_bold}🗄 Stashing Files…${c1_normal}"
+	git_stash_push_output="$(git stash push --keep-index --include-untracked --message "Pre-Commit Hook" 2>&1)"
+	if [ "$?" -ne "0" ] ; then
+		echo "${c1_red}❌ Stashing your files failed.${c1_normal}" >&2
+		echo >&2
+		echo "${git_stash_push_output}" >&2
+		echo >&2
+		exit 1
+	fi
+}
+
+function unstash {
+	echo "${c1_bold}🗄 Unstashing Files…${c1_normal}"
+	git_stash_pop_output="$(git stash pop 2>&1)"
+	if [ "$?" -ne "0" ] ; then
+		echo "${c1_red}❌ Unstashing your files failed. Check your stash with 'git stash list' and ${c1_standout}pop it by yourself${c1_normal}${c1_red}!${c1_normal}" >&2
+		echo >&2
+		echo "${git_stash_pop_output}" >&2
+		echo >&2
+		exit 1
+	fi
+}
+
+function check_format {
+	local folder="$1"
+	local is_check_format="$2"
+	
+	if [ "$is_check_format" -ne "0" ]; then
+		echo "${c1_bold}${folder} > 🔎 Checking format…${c1_normal}"
+		cargo_fmt_output="$(cargo fmt -- --check 2>&1)"
+		if [ "$?" -ne "0" ] ; then
+			echo "${c1_red}${folder} > ❌ There are some format issues. Please run 'cargo fmt'!${c1_normal}" >&2
+			echo >&2
+			echo "${cargo_fmt_output}" >&2
+			echo >&2
+			unstash
+			exit 1
+		fi
+	else
+		echo "${c1_yellow}${folder} > ⚠ Format has not been checked.${c1_normal}" >&2
+	fi
+}
+
+function check_tests {
+	local folder="$1"
+	local is_check_tests="$2"
+	
+	if [ "$is_check_tests" -ne "0" ]; then
+		echo "${c1_bold}${folder} > 🔎 Checking tests…${c1_normal}"
+		cargo_test_output="$(cargo test 2>&1)"
+		if [ "$?" -ne "0" ] ; then
+			echo "${c1_red}${folder} > ❌ There are some testing issues. Please fix them!${c1_normal}" >&2
+			echo >&2
+			echo "${cargo_test_output}" >&2
+			echo >&2
+			unstash
+			exit 1
+		fi
+	else
+		echo "${c1_yellow}${folder} > ⚠ Tests have not been checked.${c1_normal}" >&2
+	fi
+}
+
+function check_lints {
+	local folder="$1"
+	local check_lints_type="$2"
+	
+	case "$check_lints_type" in
+		0)
+			echo "${c1_yellow}${folder} > ⚠ Lints have not been checked.${c1_normal}" >&2
+			;;
+		1)
+			echo "${c1_bold}${folder} > 🔎 Checking lints with 'cargo clippy -- -D warnings'…${c1_normal}"
+			cargo_clippy_output="$(cargo clippy -- -D warnings 2>&1)"
+			if [ "$?" -ne "0" ] ; then
+				echo "${c1_red}${folder} > ❌ There are some linting issues. Please fix them!${c1_normal}" >&2
+				echo >&2
+				echo "${cargo_clippy_output}" >&2
+				echo >&2
+				unstash
+				exit 1
+			fi
+			;;
+		2)
+			echo "${c1_bold}${folder} > 🔎 Checking lints with 'cargo clippy -- -D warnings -D clippy::correctness -D clippy::suspicious'…${c1_normal}"
+			cargo_clippy_output="$(cargo clippy -- -D warnings -D clippy::correctness -D clippy::suspicious 2>&1)"
+			if [ "$?" -ne "0" ] ; then
+				echo "${c1_red}${folder} > ❌ There are some linting issues. Please fix them!${c1_normal}" >&2
+				echo >&2
+				echo "${cargo_clippy_output}" >&2
+				echo >&2
+				unstash
+				exit 1
+			fi
+			;;
+		666)
+			echo "${c1_bold}${folder} > 🔎 Checking lints with 'cargo clippy -- -D warnings -D clippy::correctness -D clippy::suspicious -D clippy::complexity -D clippy::perf -D clippy::style -D clippy::pedantic -D clippy::restriction -A clippy::blanket-clippy-restriction-lints -D clippy::cargo'…${c1_normal}"
+			cargo_clippy_output="$(cargo clippy -- -D warnings -D clippy::correctness -D clippy::suspicious -D clippy::complexity -D clippy::perf -D clippy::style -D clippy::pedantic -D clippy::restriction -A clippy::blanket-clippy-restriction-lints -D clippy::cargo 2>&1)"
+			if [ "$?" -ne "0" ] ; then
+				echo "${c1_red}${folder} > ❌ There are some linting issues. Please fix them!${c1_normal}" >&2
+				echo >&2
+				echo "${cargo_clippy_output}" >&2
+				echo >&2
+				unstash
+				exit 1
+			fi
+			;;
+		*)
+			echo "${c1_red}${folder} > ❌ Check lints type '${check_lints_type}' is unknown. Please adapt the githook file!${c1_normal}" >&2
+			unstash
+			exit 1
+			;;
+	esac
+}
+
+function check_dependencies {
+	local folder="$1"
+	local check_dependencies_type="$2"
+	
+	case "$check_dependencies_type" in
+		0)
+			echo "${c1_yellow}${folder} > ⚠ Dependencies have not been checked.${c1_normal}" >&2
+			;;
+		1)
+			echo "${c1_bold}${folder} > 🔎 Checking dependencies with 'cargo audit'…${c1_normal}"
+			cargo_audit_output="$(cargo audit 2>&1)"
+			if [ "$?" -ne "0" ] ; then
+				echo "${c1_red}${folder} > ❌ There are some dependency issues. Please fix them!${c1_normal}" >&2
+				echo >&2
+				echo "${cargo_audit_output}" >&2
+				echo >&2
+				unstash
+				exit 1
+			fi
+			;;
+		2)
+			echo "${c1_bold}${folder} > 🔎 Checking dependencies with 'cargo deny check all'…${c1_normal}"
+			cargo_deny_output="$(cargo deny check all 2>&1)"
+			if [ "$?" -ne "0" ] ; then
+				echo "${c1_red}${folder} > ❌ There are some dependency issues. Please fix them!${c1_normal}" >&2
+				echo >&2
+				echo "${cargo_deny_output}" >&2
+				echo >&2
+				unstash
+				exit 1
+			fi
+			;;
+		*)
+			echo "${c1_red}${folder} > ❌ Check dependencies type '${check_dependencies_type}' is unknown. Please adapt the githook file!${c1_normal}" >&2
+			unstash
+			exit 1
+			;;
+	esac
+}
+
+function check {
+	local folder="$1"
+	local is_check_format="$2"
+	local is_check_tests="$3"
+	local check_lints_type="$4"
+	local check_dependencies_type="$5"
+	
+	echo "${c1_bold}${folder} > 🔎 Checking folder…${c1_normal}"
+	if ! cd "${folder}" ; then
+		echo "${c1_red}${folder} > ❌ Failed changing into folder!${c1_normal}" >&2
+		unstash
+		exit 1
+	fi
+	
+	check_format "$folder" "$is_check_format"
+	check_tests "$folder" "$is_check_tests"
+	check_lints "$folder" "$check_lints_type"
+	check_dependencies "$folder" "$check_dependencies_type"
+	
+	if ! cd .. ; then
+		echo "${c1_red}${folder} > ❌ Failed changing back from folder!${c1_normal}" >&2
+		unstash
+		exit 1
+	fi
+}
+
+stash
+check "lib/" 1 1 2 2
+unstash
+
+echo "${c1_green}${c1_bold}✔ All Fine!${c1_normal}"

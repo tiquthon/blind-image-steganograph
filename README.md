@@ -9,6 +9,11 @@ With "Blind Image Steganograph" you can hide text or arbitrary files within an i
 You are free to copy, modify, and distribute "Blind Image Steganograph" with attribution under the terms of the MIT license.
 See the [LICENSE file](./LICENSE) for details.
 
+## Git Hook
+
+There is a Git Hook inside [githooks/](./githooks/) helping you providing good code quality.
+Install it inside [.git/hooks/.](./.git/hooks/) and make it executable.
+
 ---
 
 README created with the help of [https://github.com/ddbeck/readme-checklist/checklist.md](https://github.com/ddbeck/readme-checklist/blob/a234904e6d0030fe4f56f26fa1ba6e4d300b39ba/checklist.md).
