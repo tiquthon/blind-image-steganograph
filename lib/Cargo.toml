@@ -1,0 +1,13 @@
+[package]
+name = "blind-image-steganography"
+version = "0.0.0"
+authors = ["Thimo \"Tiquthon\" Neumann <tiquthon@gmail.com>"]
+edition = "2021"
+description = "Hide arbitrary data within an image without changing its perceptual quality significantly."
+readme = "README.md"
+repository = "https://github.com/tiquthon/blind-image-steganograph"
+license = "MIT"
+keywords = ["blind", "image", "steganography"]
+publish = false
+
+[dependencies]
