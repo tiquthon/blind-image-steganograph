@@ -11,10 +11,15 @@ keywords = ["blind", "image", "steganography"]
 publish = false
 
 [dependencies]
-image = { version = "0.24", default-features = false, features = ["jpeg"] }
+image = { version = "0.24", default-features = false, optional = true }
 thiserror = "1"
 typed-builder = "0.18"
-webp = "0.2"
+webp = { version = "0.2", optional = true }
+
+[features]
+default = ["webp"]
+webp = ["dep:webp", "dep:image"]
 
 [dev-dependencies]
 temp-dir = "0.1.12"
+strum = { version = "0.26", features = ["derive"] }
