@@ -12,13 +12,15 @@ publish = false
 
 [dependencies]
 image = { version = "0.24", default-features = false, optional = true }
+rand = { version = "0.8", optional = true }
 thiserror = "1"
 typed-builder = "0.18"
 webp = { version = "0.2", optional = true }
 
 [features]
-default = ["webp"]
+default = ["webp", "random"]
 webp = ["dep:webp", "dep:image"]
+random = ["dep:rand"]
 
 [dev-dependencies]
 temp-dir = "0.1.12"

@@ -269,6 +269,8 @@ pub struct InsertConfig {
     pub count_of_least_significant_bits_in_blue: CountOfLeastSignificantBits,
     #[builder(default)]
     pub count_of_least_significant_bits_in_alpha: CountOfLeastSignificantBits,
+    #[builder(default)]
+    pub remaining_bits_action: RemainingBitsAction,
 }
 
 #[derive(typed_builder::TypedBuilder, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
@@ -333,6 +335,15 @@ impl CountOfLeastSignificantBits {
 pub enum TryFromBitCountError {
     #[error("")]
     Unknown(usize),
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+pub enum RemainingBitsAction {
+    #[default]
+    None,
+    Zero,
+    #[cfg(feature = "random")]
+    Randomize,
 }
 
 #[cfg(test)]
