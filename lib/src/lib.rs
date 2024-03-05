@@ -61,7 +61,7 @@ impl Image {
     }
 
     pub fn save_to_file<P>(&self, path: P, format: ImageFormat) where P: AsRef<Path> {
-        std::fs::write(path, &self.save_to_memory(format)).unwrap();
+        std::fs::write(path, self.save_to_memory(format)).unwrap();
     }
 
     pub fn save_to_memory(&self, format: ImageFormat) -> Vec<u8> {
@@ -82,7 +82,7 @@ impl Image {
         let usable_bits_per_pixel_color_channel_in_red: usize = config.count_of_least_significant_bits_in_red.bit_count();
         let usable_bits_per_pixel_color_channel_in_green: usize = config.count_of_least_significant_bits_in_green.bit_count();
         let usable_bits_per_pixel_color_channel_in_blue: usize = config.count_of_least_significant_bits_in_blue.bit_count();
-        let usable_bits_per_pixel = usable_bits_per_pixel_color_channel_in_red as usize + usable_bits_per_pixel_color_channel_in_green as usize + usable_bits_per_pixel_color_channel_in_blue as usize;
+        let usable_bits_per_pixel = usable_bits_per_pixel_color_channel_in_red + usable_bits_per_pixel_color_channel_in_green + usable_bits_per_pixel_color_channel_in_blue;
         let pixels = match self {
             Image::Rgb8(rgb8_image) => rgb8_image.width as usize * rgb8_image.height as usize,
             Image::Rgba8(rgba8_image) => rgba8_image.width as usize * rgba8_image.height as usize,
@@ -104,16 +104,34 @@ impl Image {
 
         match self {
             Image::Rgb8(rgb8_image) => {
+                println!("before -3: {:b}", rgb8_image.pixel_data[rgb8_image.pixel_data.len() - 6]);
+                println!("before -2: {:b}", rgb8_image.pixel_data[rgb8_image.pixel_data.len() - 5]);
+                println!("before -1: {:b}", rgb8_image.pixel_data[rgb8_image.pixel_data.len() - 4]);
                 let insert_data = insert_data
                     .separate_pixel_channel_rgb(
                         config.count_of_least_significant_bits_in_red,
                         config.count_of_least_significant_bits_in_green,
-                        config.count_of_least_significant_bits_in_blue
+                        config.count_of_least_significant_bits_in_blue,
+                        Some(rgb8_image.width as usize * rgb8_image.height as usize),
+                        config.remaining_bits_action,
                     )
                     .zip(rgb8_image.pixel_data.iter_mut());
-                for ((bits, bit_mask), pixel_channel_data) in insert_data {
+                let mut pixels_done = 0;
+                for (index, ((bits, bit_mask), pixel_channel_data)) in insert_data.enumerate() {
+                    if index >= (rgb8_image.width as usize * rgb8_image.height as usize - 9) {
+                        println!("{}: {bits:b} {bit_mask:b} {pixel_channel_data:b}", index as isize - (rgb8_image.width as isize * rgb8_image.height as isize));
+                    }
                     *pixel_channel_data = (*pixel_channel_data & !bit_mask) | bits;
+                    if index >= (rgb8_image.width as usize * rgb8_image.height as usize - 9) {
+                        println!("!bit_mask {:b} (*pixel_channel_data & !bit_mask) {:b}", !bit_mask, (*pixel_channel_data & !bit_mask));
+                        println!("{}: {bits:b} {bit_mask:b} {pixel_channel_data:b}", index as isize - (rgb8_image.width as isize * rgb8_image.height as isize));
+                    }
+                    pixels_done += 1;
                 }
+                println!("after -3: {:b}", rgb8_image.pixel_data[rgb8_image.pixel_data.len() - 6]);
+                println!("after -2: {:b}", rgb8_image.pixel_data[rgb8_image.pixel_data.len() - 5]);
+                println!("after -1: {:b}", rgb8_image.pixel_data[rgb8_image.pixel_data.len() - 4]);
+                println!("{pixels_done} of {}", rgb8_image.width * rgb8_image.height);
             },
             Image::Rgba8(rgba8_image) => {
                 let insert_data = insert_data
@@ -121,7 +139,9 @@ impl Image {
                         config.count_of_least_significant_bits_in_red,
                         config.count_of_least_significant_bits_in_green,
                         config.count_of_least_significant_bits_in_blue,
-                        config.count_of_least_significant_bits_in_alpha
+                        config.count_of_least_significant_bits_in_alpha,
+                        Some(rgba8_image.width as usize * rgba8_image.height as usize),
+                        config.remaining_bits_action,
                     )
                     .zip(rgba8_image.pixel_data.iter_mut());
                 for ((bits, bit_mask), pixel_channel_data) in insert_data {
@@ -259,37 +279,36 @@ pub enum ImageFormat {
     // TODO: Ico,
 }
 
-#[derive(typed_builder::TypedBuilder, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+#[derive(typed_builder::TypedBuilder, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct InsertConfig {
-    #[builder(default)]
+    #[builder(default=CountOfLeastSignificantBits::One)]
     pub count_of_least_significant_bits_in_red: CountOfLeastSignificantBits,
-    #[builder(default)]
+    #[builder(default=CountOfLeastSignificantBits::One)]
     pub count_of_least_significant_bits_in_green: CountOfLeastSignificantBits,
-    #[builder(default)]
+    #[builder(default=CountOfLeastSignificantBits::One)]
     pub count_of_least_significant_bits_in_blue: CountOfLeastSignificantBits,
-    #[builder(default)]
+    #[builder(default=CountOfLeastSignificantBits::Zero)]
     pub count_of_least_significant_bits_in_alpha: CountOfLeastSignificantBits,
     #[builder(default)]
     pub remaining_bits_action: RemainingBitsAction,
 }
 
-#[derive(typed_builder::TypedBuilder, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+#[derive(typed_builder::TypedBuilder, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct ExtractConfig {
-    #[builder(default)]
+    #[builder(default=CountOfLeastSignificantBits::One)]
     pub count_of_least_significant_bits_in_red: CountOfLeastSignificantBits,
-    #[builder(default)]
+    #[builder(default=CountOfLeastSignificantBits::One)]
     pub count_of_least_significant_bits_in_green: CountOfLeastSignificantBits,
-    #[builder(default)]
+    #[builder(default=CountOfLeastSignificantBits::One)]
     pub count_of_least_significant_bits_in_blue: CountOfLeastSignificantBits,
-    #[builder(default)]
+    #[builder(default=CountOfLeastSignificantBits::Zero)]
     pub count_of_least_significant_bits_in_alpha: CountOfLeastSignificantBits,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 #[cfg_attr(test, derive(strum::EnumIter))]
 pub enum CountOfLeastSignificantBits {
     Zero,
-    #[default]
     One,
     Two,
     Three,
@@ -343,7 +362,9 @@ pub enum RemainingBitsAction {
     None,
     Zero,
     #[cfg(feature = "random")]
-    Randomize,
+    Randomize {
+        seed: Option<u64>,
+    },
 }
 
 #[cfg(test)]

@@ -1,15 +1,25 @@
-use crate::CountOfLeastSignificantBits;
+use crate::{CountOfLeastSignificantBits, RemainingBitsAction};
 
 pub struct PixelChannelSeparator<'a, I: Iterator<Item=&'a u8>, const CHANNELS: usize> {
     inner: I,
+    count_of_least_significant_bits: [CountOfLeastSignificantBits; CHANNELS],
+    expected_pixels: Option<usize>,
+    pixel_returned_so_far: usize,
+    remaining_bits_action: RemainingBitsAction,
+    #[cfg(feature = "random")]
+    rng: Option<rand::rngs::StdRng>,
     channel_index: usize,
     current_byte: Option<u8>,
     current_byte_offset: usize,
-    count_of_least_significant_bits: [CountOfLeastSignificantBits; CHANNELS],
 }
 
 impl<'a, I: Iterator<Item=&'a u8>, const CHANNELS: usize> PixelChannelSeparator<'a, I, CHANNELS> {
-    pub fn new<J>(inner: J, count_of_least_significant_bits: [CountOfLeastSignificantBits; CHANNELS]) -> Self
+    pub fn new<J>(
+        inner: J,
+        count_of_least_significant_bits: [CountOfLeastSignificantBits; CHANNELS],
+        expected_pixels: Option<usize>,
+        remaining_bits_action: RemainingBitsAction
+    ) -> Self
         where J: IntoIterator<IntoIter=I>
     {
         let bits_per_pixel = count_of_least_significant_bits.into_iter()
@@ -22,6 +32,11 @@ impl<'a, I: Iterator<Item=&'a u8>, const CHANNELS: usize> PixelChannelSeparator<
             current_byte: None,
             current_byte_offset: 0,
             count_of_least_significant_bits,
+            expected_pixels,
+            pixel_returned_so_far: 0,
+            remaining_bits_action,
+            #[cfg(feature = "random")]
+            rng: None,
         }
     }
 }
@@ -30,17 +45,43 @@ impl<'a, I: Iterator<Item=&'a u8>, const CHANNELS: usize> Iterator for PixelChan
     type Item = (u8, u8);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let current_byte = match self.current_byte {
-            Some(current_byte) => current_byte,
-            None => *(self.inner.next()?),
-        };
-
         let needed_bits_for_current_channel: usize = self.count_of_least_significant_bits[self.channel_index].bit_count();
-        let usable_bits_from_current_byte = 8 - self.current_byte_offset;
-
         let bit_mask = 2u8.pow(needed_bits_for_current_channel as u32) - 1;
 
-        if needed_bits_for_current_channel <= usable_bits_from_current_byte {
+        let current_byte = match self.current_byte {
+            Some(current_byte) => current_byte,
+            None => match self.inner.next() {
+                Some(next_byte) => *next_byte,
+                None => return match self.expected_pixels {
+                    Some(expected_pixels) => if self.pixel_returned_so_far >= expected_pixels {
+                        None
+                    } else {
+                        match self.remaining_bits_action {
+                            RemainingBitsAction::None => None,
+                            RemainingBitsAction::Zero => {
+                                self.channel_index = (self.channel_index + 1) % CHANNELS;
+                                self.pixel_returned_so_far += 1;
+
+                                Some((0, bit_mask))
+                            },
+                            #[cfg(feature = "random")]
+                            RemainingBitsAction::Randomize { seed } => {
+                                self.channel_index = (self.channel_index + 1) % CHANNELS;
+                                self.pixel_returned_so_far += 1;
+                                use rand::Rng;
+                                let rng = self.rng.get_or_insert_with(|| <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(seed.unwrap_or_default()));
+                                Some((rng.gen::<u8>() & bit_mask, bit_mask))
+                            },
+                        }
+                    },
+                    None => None,
+                },
+            },
+        };
+
+        let usable_bits_from_current_byte = 8 - self.current_byte_offset;
+
+        let (bits, bit_mask) = if needed_bits_for_current_channel <= usable_bits_from_current_byte {
             let bits = (current_byte >> (8 - needed_bits_for_current_channel - self.current_byte_offset)) & bit_mask;
             self.current_byte_offset += needed_bits_for_current_channel;
             if self.current_byte_offset >= 8 {
@@ -49,8 +90,7 @@ impl<'a, I: Iterator<Item=&'a u8>, const CHANNELS: usize> Iterator for PixelChan
             } else {
                 self.current_byte = Some(current_byte);
             }
-            self.channel_index = (self.channel_index + 1) % CHANNELS;
-            Some((bits, bit_mask))
+            (bits, bit_mask)
         } else {
             let needed_bits_from_current_byte = usable_bits_from_current_byte;
             let needed_bits_from_next_byte = needed_bits_for_current_channel - usable_bits_from_current_byte;
@@ -60,11 +100,13 @@ impl<'a, I: Iterator<Item=&'a u8>, const CHANNELS: usize> Iterator for PixelChan
             self.current_byte = self.inner.next().copied();
             self.current_byte_offset = needed_bits_from_next_byte;
             if let Some(next_byte) = self.current_byte {
-                bits = bits | ((next_byte >> (8 - needed_bits_from_next_byte)) & bit_mask_next_byte);
+                bits |= (next_byte >> (8 - needed_bits_from_next_byte)) & bit_mask_next_byte;
             }
-            self.channel_index = (self.channel_index + 1) % CHANNELS;
-            Some((bits, bit_mask))
-        }
+            (bits, bit_mask)
+        };
+        self.channel_index = (self.channel_index + 1) % CHANNELS;
+        self.pixel_returned_so_far += 1;
+        Some((bits, bit_mask))
     }
 }
 
@@ -74,6 +116,8 @@ pub trait PixelChannelSeparatorIteratorExt<'a> {
         count_of_least_significant_bits_in_red: CountOfLeastSignificantBits,
         count_of_least_significant_bits_in_green: CountOfLeastSignificantBits,
         count_of_least_significant_bits_in_blue: CountOfLeastSignificantBits,
+        expected_pixels: Option<usize>,
+        remaining_bits_action: RemainingBitsAction,
     ) -> PixelChannelSeparator<'a, <Self as IntoIterator>::IntoIter, 3>
         where Self: Sized + IntoIterator<Item=&'a u8>;
     fn separate_pixel_channel_rgba(
@@ -82,6 +126,8 @@ pub trait PixelChannelSeparatorIteratorExt<'a> {
         count_of_least_significant_bits_in_green: CountOfLeastSignificantBits,
         count_of_least_significant_bits_in_blue: CountOfLeastSignificantBits,
         count_of_least_significant_bits_in_alpha: CountOfLeastSignificantBits,
+        expected_pixels: Option<usize>,
+        remaining_bits_action: RemainingBitsAction,
     ) -> PixelChannelSeparator<'a, <Self as IntoIterator>::IntoIter, 4>
         where Self: Sized + IntoIterator<Item=&'a u8>;
 }
@@ -92,6 +138,8 @@ impl<'a, I: IntoIterator<Item=&'a u8>> PixelChannelSeparatorIteratorExt<'a> for 
         count_of_least_significant_bits_in_red: CountOfLeastSignificantBits,
         count_of_least_significant_bits_in_green: CountOfLeastSignificantBits,
         count_of_least_significant_bits_in_blue: CountOfLeastSignificantBits,
+        expected_pixels: Option<usize>,
+        remaining_bits_action: RemainingBitsAction,
     ) -> PixelChannelSeparator<'a, <Self as IntoIterator>::IntoIter, 3>
         where Self: Sized + IntoIterator<Item=&'a u8>
     {
@@ -102,6 +150,8 @@ impl<'a, I: IntoIterator<Item=&'a u8>> PixelChannelSeparatorIteratorExt<'a> for 
                 count_of_least_significant_bits_in_green,
                 count_of_least_significant_bits_in_blue,
             ],
+            expected_pixels,
+            remaining_bits_action,
         )
     }
 
@@ -111,6 +161,8 @@ impl<'a, I: IntoIterator<Item=&'a u8>> PixelChannelSeparatorIteratorExt<'a> for 
         count_of_least_significant_bits_in_green: CountOfLeastSignificantBits,
         count_of_least_significant_bits_in_blue: CountOfLeastSignificantBits,
         count_of_least_significant_bits_in_alpha: CountOfLeastSignificantBits,
+        expected_pixels: Option<usize>,
+        remaining_bits_action: RemainingBitsAction,
     ) -> PixelChannelSeparator<'a, <Self as IntoIterator>::IntoIter, 4>
         where Self: Sized + IntoIterator<Item=&'a u8>
     {
@@ -122,6 +174,8 @@ impl<'a, I: IntoIterator<Item=&'a u8>> PixelChannelSeparatorIteratorExt<'a> for 
                 count_of_least_significant_bits_in_blue,
                 count_of_least_significant_bits_in_alpha,
             ],
+            expected_pixels,
+            remaining_bits_action,
         )
     }
 }
@@ -254,11 +308,12 @@ impl<'a, I: IntoIterator<Item=&'a u8>> PixelChannelCombinatorIteratorExt<'a> for
 }
 
 #[cfg(test)]
+#[allow(clippy::unusual_byte_groupings)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_pixel_channel_separator_one_one_one() {
+    fn test_pixel_channel_separator_one_one_one_and_no_remaining() {
         // Arrange
         let bytes = [
             0b0_1_0_1_1_0_1_0u8
@@ -270,6 +325,8 @@ mod tests {
                 CountOfLeastSignificantBits::One,
                 CountOfLeastSignificantBits::One,
                 CountOfLeastSignificantBits::One,
+                None,
+                RemainingBitsAction::None,
             )
             .collect::<Vec<_>>();
 
@@ -290,7 +347,84 @@ mod tests {
     }
 
     #[test]
-    fn test_pixel_channel_separator_one_one_one_one() {
+    fn test_pixel_channel_separator_one_one_one_and_remaining_none() {
+        // Arrange
+        let bytes = [
+            0b0_1_0_1_1_0_1_0u8
+        ];
+
+        // Act
+        let output = bytes.iter()
+            .separate_pixel_channel_rgb(
+                CountOfLeastSignificantBits::One,
+                CountOfLeastSignificantBits::One,
+                CountOfLeastSignificantBits::One,
+                Some(16),
+                RemainingBitsAction::None,
+            )
+            .collect::<Vec<_>>();
+
+        // Assert
+        assert_eq!(
+            output,
+            [
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_1u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_1u8, 0b0000000_1u8),
+                (0b0000000_1u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_1u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_pixel_channel_separator_one_one_one_and_remaining_zero() {
+        // Arrange
+        let bytes = [
+            0b0_1_0_1_1_0_1_0u8
+        ];
+
+        // Act
+        let output = bytes.iter()
+            .separate_pixel_channel_rgb(
+                CountOfLeastSignificantBits::One,
+                CountOfLeastSignificantBits::One,
+                CountOfLeastSignificantBits::One,
+                Some(16),
+                RemainingBitsAction::Zero,
+            )
+            .collect::<Vec<_>>();
+
+        // Assert
+        assert_eq!(
+            output,
+            [
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_1u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_1u8, 0b0000000_1u8),
+                (0b0000000_1u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_1u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+                (0b0000000_0u8, 0b0000000_1u8),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_pixel_channel_separator_one_one_one_one_and_no_remaining() {
         // Arrange
         let bytes = [
             0b0_1_0_1_1_0_1_0u8
@@ -303,6 +437,8 @@ mod tests {
                 CountOfLeastSignificantBits::One,
                 CountOfLeastSignificantBits::One,
                 CountOfLeastSignificantBits::One,
+                None,
+                RemainingBitsAction::None,
             )
             .collect::<Vec<_>>();
 
@@ -323,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pixel_channel_separator_one_two_three() {
+    fn test_pixel_channel_separator_one_two_three_and_no_remaining() {
         // Arrange
         let bytes = [
             0b0_10_110_1_0u8
@@ -335,6 +471,8 @@ mod tests {
                 CountOfLeastSignificantBits::One,
                 CountOfLeastSignificantBits::Two,
                 CountOfLeastSignificantBits::Three,
+                None,
+                RemainingBitsAction::None,
             )
             .collect::<Vec<_>>();
 
@@ -352,7 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pixel_channel_separator_one_two_three_four() {
+    fn test_pixel_channel_separator_one_two_three_four_and_no_remaining() {
         // Arrange
         let bytes = [
             0b0_10_110_10u8
@@ -365,6 +503,8 @@ mod tests {
                 CountOfLeastSignificantBits::Two,
                 CountOfLeastSignificantBits::Three,
                 CountOfLeastSignificantBits::Four,
+                None,
+                RemainingBitsAction::None,
             )
             .collect::<Vec<_>>();
 
@@ -381,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pixel_channel_combinator_one_one_one() {
+    fn test_pixel_channel_combinator_one_one_one_and_no_remaining() {
         // Arrange
         let bytes = [
             0b0000000_0u8,
@@ -423,7 +563,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pixel_channel_combinator_one_one_one_one() {
+    fn test_pixel_channel_combinator_one_one_one_one_and_no_remaining() {
         // Arrange
         let bytes = [
             0b0000000_0u8,
@@ -466,7 +606,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pixel_channel_combinator_one_two_three() {
+    fn test_pixel_channel_combinator_one_two_three_and_no_remaining() {
         // Arrange
         let bytes = [
             0b0000000_0u8,
@@ -503,7 +643,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pixel_channel_combinator_one_two_three_four() {
+    fn test_pixel_channel_combinator_one_two_three_four_and_no_remaining() {
         // Arrange
         let bytes = [
             0b0000000_0u8,

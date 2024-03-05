@@ -2,12 +2,16 @@ use blind_image_steganography::{CountOfLeastSignificantBits, Image, ImageFormat,
 
 fn main() {
     let mut m = Image::load_from_file("tests/assets/pexels-pixabay-53114_resized.webp").unwrap();
+    #[cfg(feature = "random")]
+    let rembitact = RemainingBitsAction::Randomize { seed: None };
+    #[cfg(not(feature = "random"))]
+    let rembitact = RemainingBitsAction::Zero;
     let conf = InsertConfig::builder()
         .count_of_least_significant_bits_in_red(CountOfLeastSignificantBits::Two)
         .count_of_least_significant_bits_in_green(CountOfLeastSignificantBits::Two)
         .count_of_least_significant_bits_in_blue(CountOfLeastSignificantBits::Two)
         .count_of_least_significant_bits_in_alpha(CountOfLeastSignificantBits::Zero)
-        .remaining_bits_action(RemainingBitsAction::Randomize)
+        .remaining_bits_action(rembitact)
         .build();
     println!("Max Data: {} bytes", m.max_data_capacity_with_config(&conf));
     m.insert_data(
