@@ -1,3 +1,4 @@
+use image::DynamicImage;
 use std::path::Path;
 
 use crate::special_pixel_iterator::{
@@ -13,6 +14,30 @@ pub enum Image {
 }
 
 impl Image {
+    pub fn from_dynamic_image(dynamic_image: DynamicImage) -> Self {
+        match dynamic_image {
+            DynamicImage::ImageLuma8(_) => unimplemented!(),
+            DynamicImage::ImageLumaA8(_) => unimplemented!(),
+            DynamicImage::ImageRgb8(rgb8_image) => Self::Rgb8(Rgb8Image {
+                width: rgb8_image.width(),
+                height: rgb8_image.height(),
+                pixel_data: rgb8_image.to_vec(),
+            }),
+            DynamicImage::ImageRgba8(rgba8_image) => Self::Rgb8(Rgb8Image {
+                width: rgba8_image.width(),
+                height: rgba8_image.height(),
+                pixel_data: rgba8_image.to_vec(),
+            }),
+            DynamicImage::ImageLuma16(_) => unimplemented!(),
+            DynamicImage::ImageLumaA16(_) => unimplemented!(),
+            DynamicImage::ImageRgb16(_) => unimplemented!(),
+            DynamicImage::ImageRgba16(_) => unimplemented!(),
+            DynamicImage::ImageRgb32F(_) => unimplemented!(),
+            DynamicImage::ImageRgba32F(_) => unimplemented!(),
+            _ => unimplemented!(),
+        }
+    }
+
     pub fn load_from_file<P>(path: P) -> Result<Self, LoadFromFileError>
     where
         P: AsRef<Path>,
@@ -153,6 +178,35 @@ impl Image {
         usable_bits / 8
     }
 
+    pub fn min_pixels_needed_with_config(
+        data_size: usize,
+        config: &InsertConfig,
+        has_alpha_channel: bool,
+    ) -> usize {
+        let usable_bits_per_pixel_color_channel_in_red: usize =
+            config.count_of_least_significant_bits_in_red.bit_count();
+        let usable_bits_per_pixel_color_channel_in_green: usize =
+            config.count_of_least_significant_bits_in_green.bit_count();
+        let usable_bits_per_pixel_color_channel_in_blue: usize =
+            config.count_of_least_significant_bits_in_blue.bit_count();
+        let usable_bits_per_pixel = if has_alpha_channel {
+            let usable_bits_per_pixel_color_channel_in_alpha: usize =
+                config.count_of_least_significant_bits_in_alpha.bit_count();
+            usable_bits_per_pixel_color_channel_in_red
+                + usable_bits_per_pixel_color_channel_in_green
+                + usable_bits_per_pixel_color_channel_in_blue
+                + usable_bits_per_pixel_color_channel_in_alpha
+        } else {
+            usable_bits_per_pixel_color_channel_in_red
+                + usable_bits_per_pixel_color_channel_in_green
+                + usable_bits_per_pixel_color_channel_in_blue
+        };
+        let needed_space_for_length_meta_information = 128;
+        (((data_size * 8) + needed_space_for_length_meta_information) as f64
+            / usable_bits_per_pixel as f64)
+            .ceil() as usize
+    }
+
     pub fn insert_data(
         &mut self,
         data: &[u8],
@@ -160,7 +214,10 @@ impl Image {
     ) -> Result<(), InsertDataError> {
         let max_capacity = self.max_data_capacity_with_config(config);
         if data.len() > max_capacity {
-            return Err(InsertDataError::DataExceedsCapacity);
+            return Err(InsertDataError::DataExceedsCapacity {
+                data: data.len(),
+                capacity: max_capacity,
+            });
         }
 
         let length: [u8; 16] = (data.len() as u128).to_be_bytes();
@@ -310,8 +367,8 @@ pub enum SaveToMemoryError {}
 
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum InsertDataError {
-    #[error("Data exceeds maximum available capacity")]
-    DataExceedsCapacity,
+    #[error("Data with size '{data}' exceeds maximum available capacity of '{capacity}'")]
+    DataExceedsCapacity { data: usize, capacity: usize },
 }
 
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
