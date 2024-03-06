@@ -12,12 +12,14 @@ fn load_save_file() {
     // Act
     let image_a = Image::load_from_file("tests/assets/pexels-pixabay-53114_resized.webp").unwrap();
 
-    image_a.save_to_file(&result_file_a, ImageFormat::WebP);
+    image_a
+        .save_to_file(&result_file_a, ImageFormat::WebP)
+        .unwrap();
 
     let image_a_bytes = std::fs::read(&result_file_a).unwrap();
     let image_b = Image::load_from_memory(&image_a_bytes).unwrap();
 
-    let image_b_bytes = image_b.save_to_memory(ImageFormat::WebP);
+    let image_b_bytes = image_b.save_to_memory(ImageFormat::WebP).unwrap();
 
     std::fs::write(&result_file_b, &image_b_bytes).unwrap();
     let image_c = Image::load_from_file_with_format(&result_file_b, ImageFormat::WebP).unwrap();

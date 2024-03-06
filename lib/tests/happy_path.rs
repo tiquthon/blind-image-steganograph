@@ -1,5 +1,5 @@
-use temp_dir::TempDir;
 use blind_image_steganography::{ExtractConfig, Image, ImageFormat, InsertConfig};
+use temp_dir::TempDir;
 
 #[test]
 fn happy_path() {
@@ -7,13 +7,18 @@ fn happy_path() {
     let insert_data = "Hello steganography!";
     let temp_dir = TempDir::new().unwrap();
     let result_file = temp_dir.child("test_a.webp");
-    let mut image = Image::load_from_file("tests/assets/pexels-pixabay-53114_resized.webp").unwrap();
+    let mut image =
+        Image::load_from_file("tests/assets/pexels-pixabay-53114_resized.webp").unwrap();
 
     // Act
-    image.insert_data(insert_data.as_bytes(), &InsertConfig::builder().build()).unwrap();
-    image.save_to_file(&result_file, ImageFormat::WebP);
+    image
+        .insert_data(insert_data.as_bytes(), &InsertConfig::builder().build())
+        .unwrap();
+    image.save_to_file(&result_file, ImageFormat::WebP).unwrap();
     let image = Image::load_from_file(&result_file).unwrap();
-    let extracted_data = image.extract_data(&ExtractConfig::builder().build());
+    let extracted_data = image
+        .extract_data(&ExtractConfig::builder().build())
+        .unwrap();
 
     // Assert
     assert_eq!(insert_data.as_bytes(), &extracted_data);

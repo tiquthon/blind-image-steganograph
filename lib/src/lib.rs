@@ -1,7 +1,10 @@
-mod special_pixel_iterator;
-
 use std::path::Path;
-use crate::special_pixel_iterator::{PixelChannelCombinatorIteratorExt, PixelChannelSeparatorIteratorExt};
+
+use crate::special_pixel_iterator::{
+    PixelChannelCombinatorIteratorExt, PixelChannelSeparatorIteratorExt,
+};
+
+mod special_pixel_iterator;
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum Image {
@@ -10,22 +13,35 @@ pub enum Image {
 }
 
 impl Image {
-    pub fn load_from_file<P>(path: P) -> Result<Self, LoadFromFileError> where P: AsRef<Path> {
+    pub fn load_from_file<P>(path: P) -> Result<Self, LoadFromFileError>
+    where
+        P: AsRef<Path>,
+    {
         #[cfg(feature = "webp")]
         match Self::load_from_file_with_format(path, ImageFormat::WebP) {
             Ok(image) => return Ok(image),
-            Err(LoadFromFileWithFormatError::ReadFile(e)) => return Err(LoadFromFileError::ReadFile(e)),
+            Err(LoadFromFileWithFormatError::ReadFile(e)) => {
+                return Err(LoadFromFileError::ReadFile(e))
+            }
             Err(LoadFromFileWithFormatError::LoadFailed(_)) => (),
         }
         Err(LoadFromFileError::UnknownFormat)
     }
 
-    pub fn load_from_file_with_format<P>(path: P, format: ImageFormat) -> Result<Self, LoadFromFileWithFormatError> where P: AsRef<Path> {
+    pub fn load_from_file_with_format<P>(
+        path: P,
+        format: ImageFormat,
+    ) -> Result<Self, LoadFromFileWithFormatError>
+    where
+        P: AsRef<Path>,
+    {
         match format {
             #[cfg(feature = "webp")]
             ImageFormat::WebP => Ok(Self::load_from_memory_with_format(
-                &std::fs::read(path).map_err(LoadFromFileWithFormatError::ReadFile)?, format
-            ).map_err(LoadFromFileWithFormatError::LoadFailed)?),
+                &std::fs::read(path).map_err(LoadFromFileWithFormatError::ReadFile)?,
+                format,
+            )
+            .map_err(LoadFromFileWithFormatError::LoadFailed)?),
         }
     }
 
@@ -38,10 +54,17 @@ impl Image {
         Err(LoadFromMemoryError::UnknownFormat)
     }
 
-    pub fn load_from_memory_with_format(buffer: &[u8], format: ImageFormat) -> Result<Self, LoadFromMemoryWithFormatError> {
+    pub fn load_from_memory_with_format(
+        buffer: &[u8],
+        format: ImageFormat,
+    ) -> Result<Self, LoadFromMemoryWithFormatError> {
         match format {
             #[cfg(feature = "webp")]
-            ImageFormat::WebP => match webp::Decoder::new(buffer).decode().ok_or(LoadFromMemoryWithFormatError::DecodeWebP)?.to_image() {
+            ImageFormat::WebP => match webp::Decoder::new(buffer)
+                .decode()
+                .ok_or(LoadFromMemoryWithFormatError::DecodeWebP)?
+                .to_image()
+            {
                 image::DynamicImage::ImageRgb8(r) => Ok(Self::Rgb8(Rgb8Image {
                     width: r.width(),
                     height: r.height(),
@@ -52,47 +75,89 @@ impl Image {
                     height: r.height(),
                     pixel_data: r.into_vec(),
                 })),
-                image::DynamicImage::ImageLuma8(_) |image::DynamicImage::ImageLumaA8(_) |image::DynamicImage::ImageLuma16(_) |
-                image::DynamicImage::ImageLumaA16(_) |image::DynamicImage::ImageRgb16(_) |image::DynamicImage::ImageRgba16(_) |
-                image::DynamicImage::ImageRgb32F(_) |image::DynamicImage::ImageRgba32F(_) => unreachable!(),
+                image::DynamicImage::ImageLuma8(_)
+                | image::DynamicImage::ImageLumaA8(_)
+                | image::DynamicImage::ImageLuma16(_)
+                | image::DynamicImage::ImageLumaA16(_)
+                | image::DynamicImage::ImageRgb16(_)
+                | image::DynamicImage::ImageRgba16(_)
+                | image::DynamicImage::ImageRgb32F(_)
+                | image::DynamicImage::ImageRgba32F(_) => unreachable!(),
                 _ => unimplemented!(),
             },
         }
     }
 
-    pub fn save_to_file<P>(&self, path: P, format: ImageFormat) where P: AsRef<Path> {
-        std::fs::write(path, self.save_to_memory(format)).unwrap();
+    pub fn save_to_file<P>(&self, path: P, format: ImageFormat) -> Result<(), SaveToFileError>
+    where
+        P: AsRef<Path>,
+    {
+        std::fs::write(
+            path,
+            self.save_to_memory(format)
+                .map_err(SaveToFileError::SaveFailed)?,
+        )
+        .map_err(SaveToFileError::WriteFile)
     }
 
-    pub fn save_to_memory(&self, format: ImageFormat) -> Vec<u8> {
+    pub fn save_to_memory(&self, format: ImageFormat) -> Result<Vec<u8>, SaveToMemoryError> {
         match format {
             #[cfg(feature = "webp")]
             ImageFormat::WebP => match self {
-                Image::Rgb8(rgb8_image) => webp::Encoder::from_rgb(&rgb8_image.pixel_data, rgb8_image.width, rgb8_image.height)
-                    .encode_lossless()
-                    .to_vec(),
-                Image::Rgba8(rgba8_image) => webp::Encoder::from_rgb(&rgba8_image.pixel_data, rgba8_image.width, rgba8_image.height)
-                    .encode_lossless()
-                    .to_vec(),
-            }
+                Image::Rgb8(rgb8_image) => Ok(webp::Encoder::from_rgb(
+                    &rgb8_image.pixel_data,
+                    rgb8_image.width,
+                    rgb8_image.height,
+                )
+                .encode_lossless()
+                .to_vec()),
+                Image::Rgba8(rgba8_image) => Ok(webp::Encoder::from_rgb(
+                    &rgba8_image.pixel_data,
+                    rgba8_image.width,
+                    rgba8_image.height,
+                )
+                .encode_lossless()
+                .to_vec()),
+            },
         }
     }
 
     pub fn max_data_capacity_with_config(&self, config: &InsertConfig) -> usize {
-        let usable_bits_per_pixel_color_channel_in_red: usize = config.count_of_least_significant_bits_in_red.bit_count();
-        let usable_bits_per_pixel_color_channel_in_green: usize = config.count_of_least_significant_bits_in_green.bit_count();
-        let usable_bits_per_pixel_color_channel_in_blue: usize = config.count_of_least_significant_bits_in_blue.bit_count();
-        let usable_bits_per_pixel = usable_bits_per_pixel_color_channel_in_red + usable_bits_per_pixel_color_channel_in_green + usable_bits_per_pixel_color_channel_in_blue;
-        let pixels = match self {
-            Image::Rgb8(rgb8_image) => rgb8_image.width as usize * rgb8_image.height as usize,
-            Image::Rgba8(rgba8_image) => rgba8_image.width as usize * rgba8_image.height as usize,
+        let usable_bits_per_pixel_color_channel_in_red: usize =
+            config.count_of_least_significant_bits_in_red.bit_count();
+        let usable_bits_per_pixel_color_channel_in_green: usize =
+            config.count_of_least_significant_bits_in_green.bit_count();
+        let usable_bits_per_pixel_color_channel_in_blue: usize =
+            config.count_of_least_significant_bits_in_blue.bit_count();
+        let (pixels, usable_bits_per_pixel) = match self {
+            Image::Rgb8(rgb8_image) => (
+                rgb8_image.width as usize * rgb8_image.height as usize,
+                usable_bits_per_pixel_color_channel_in_red
+                    + usable_bits_per_pixel_color_channel_in_green
+                    + usable_bits_per_pixel_color_channel_in_blue,
+            ),
+            Image::Rgba8(rgba8_image) => {
+                let usable_bits_per_pixel_color_channel_in_alpha: usize =
+                    config.count_of_least_significant_bits_in_alpha.bit_count();
+                (
+                    rgba8_image.width as usize * rgba8_image.height as usize,
+                    usable_bits_per_pixel_color_channel_in_red
+                        + usable_bits_per_pixel_color_channel_in_green
+                        + usable_bits_per_pixel_color_channel_in_blue
+                        + usable_bits_per_pixel_color_channel_in_alpha,
+                )
+            }
         };
         let needed_space_for_length_meta_information = 128;
         let usable_bits = usable_bits_per_pixel * pixels - needed_space_for_length_meta_information;
         usable_bits / 8
     }
 
-    pub fn insert_data(&mut self, data: &[u8], config: &InsertConfig) -> Result<(), InsertDataError> {
+    pub fn insert_data(
+        &mut self,
+        data: &[u8],
+        config: &InsertConfig,
+    ) -> Result<(), InsertDataError> {
         let max_capacity = self.max_data_capacity_with_config(config);
         if data.len() > max_capacity {
             return Err(InsertDataError::DataExceedsCapacity);
@@ -104,10 +169,7 @@ impl Image {
 
         match self {
             Image::Rgb8(rgb8_image) => {
-                println!("before -3: {:b}", rgb8_image.pixel_data[rgb8_image.pixel_data.len() - 6]);
-                println!("before -2: {:b}", rgb8_image.pixel_data[rgb8_image.pixel_data.len() - 5]);
-                println!("before -1: {:b}", rgb8_image.pixel_data[rgb8_image.pixel_data.len() - 4]);
-                let insert_data = insert_data
+                insert_data
                     .separate_pixel_channel_rgb(
                         config.count_of_least_significant_bits_in_red,
                         config.count_of_least_significant_bits_in_green,
@@ -115,26 +177,13 @@ impl Image {
                         Some(rgb8_image.width as usize * rgb8_image.height as usize),
                         config.remaining_bits_action,
                     )
-                    .zip(rgb8_image.pixel_data.iter_mut());
-                let mut pixels_done = 0;
-                for (index, ((bits, bit_mask), pixel_channel_data)) in insert_data.enumerate() {
-                    if index >= (rgb8_image.width as usize * rgb8_image.height as usize - 9) {
-                        println!("{}: {bits:b} {bit_mask:b} {pixel_channel_data:b}", index as isize - (rgb8_image.width as isize * rgb8_image.height as isize));
-                    }
-                    *pixel_channel_data = (*pixel_channel_data & !bit_mask) | bits;
-                    if index >= (rgb8_image.width as usize * rgb8_image.height as usize - 9) {
-                        println!("!bit_mask {:b} (*pixel_channel_data & !bit_mask) {:b}", !bit_mask, (*pixel_channel_data & !bit_mask));
-                        println!("{}: {bits:b} {bit_mask:b} {pixel_channel_data:b}", index as isize - (rgb8_image.width as isize * rgb8_image.height as isize));
-                    }
-                    pixels_done += 1;
-                }
-                println!("after -3: {:b}", rgb8_image.pixel_data[rgb8_image.pixel_data.len() - 6]);
-                println!("after -2: {:b}", rgb8_image.pixel_data[rgb8_image.pixel_data.len() - 5]);
-                println!("after -1: {:b}", rgb8_image.pixel_data[rgb8_image.pixel_data.len() - 4]);
-                println!("{pixels_done} of {}", rgb8_image.width * rgb8_image.height);
-            },
+                    .zip(rgb8_image.pixel_data.iter_mut())
+                    .for_each(|((bits, bit_mask), pixel_channel_data)| {
+                        *pixel_channel_data = (*pixel_channel_data & !bit_mask) | bits
+                    });
+            }
             Image::Rgba8(rgba8_image) => {
-                let insert_data = insert_data
+                insert_data
                     .separate_pixel_channel_rgba(
                         config.count_of_least_significant_bits_in_red,
                         config.count_of_least_significant_bits_in_green,
@@ -143,79 +192,65 @@ impl Image {
                         Some(rgba8_image.width as usize * rgba8_image.height as usize),
                         config.remaining_bits_action,
                     )
-                    .zip(rgba8_image.pixel_data.iter_mut());
-                for ((bits, bit_mask), pixel_channel_data) in insert_data {
-                    *pixel_channel_data = (*pixel_channel_data & !bit_mask) | bits;
-                }
-            },
+                    .zip(rgba8_image.pixel_data.iter_mut())
+                    .for_each(|((bits, bit_mask), pixel_channel_data)| {
+                        *pixel_channel_data = (*pixel_channel_data & !bit_mask) | bits
+                    });
+            }
         }
 
         Ok(())
     }
 
-    pub fn extract_data(&self, config: &ExtractConfig) -> Vec<u8> {
+    pub fn extract_data(&self, config: &ExtractConfig) -> Result<Vec<u8>, ExtractDataError> {
         match self {
             Image::Rgb8(rgb8_image) => {
-                let mut m = rgb8_image.pixel_data.iter()
-                    .combine_pixel_channel_rgb(
-                        config.count_of_least_significant_bits_in_red,
-                        config.count_of_least_significant_bits_in_green,
-                        config.count_of_least_significant_bits_in_blue,
+                let mut extract_data = rgb8_image.pixel_data.iter().combine_pixel_channel_rgb(
+                    config.count_of_least_significant_bits_in_red,
+                    config.count_of_least_significant_bits_in_green,
+                    config.count_of_least_significant_bits_in_blue,
+                );
+                let mut length = [0u8; 16];
+                for (index, length_cell) in length.iter_mut().enumerate() {
+                    *length_cell = extract_data
+                        .next()
+                        .ok_or(ExtractDataError::MissingByteForLength { index })?;
+                }
+                let length = i128::from_be_bytes(length) as usize;
+                let mut output = Vec::with_capacity(length);
+                for index in 0..length {
+                    output.push(
+                        extract_data
+                            .next()
+                            .ok_or(ExtractDataError::MissingDataBytes { index, length })?,
                     );
-                let length = i128::from_be_bytes([
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                ]) as usize;
-                m.take(length).collect::<Vec<_>>()
+                }
+                Ok(output)
             }
             Image::Rgba8(rgba8_image) => {
-                let mut m = rgba8_image.pixel_data.iter()
-                    .combine_pixel_channel_rgba(
-                        config.count_of_least_significant_bits_in_red,
-                        config.count_of_least_significant_bits_in_green,
-                        config.count_of_least_significant_bits_in_blue,
-                        config.count_of_least_significant_bits_in_alpha,
+                let mut extract_data = rgba8_image.pixel_data.iter().combine_pixel_channel_rgba(
+                    config.count_of_least_significant_bits_in_red,
+                    config.count_of_least_significant_bits_in_green,
+                    config.count_of_least_significant_bits_in_blue,
+                    config.count_of_least_significant_bits_in_alpha,
+                );
+                let mut length = [0u8; 16];
+                for (index, length_cell) in length.iter_mut().enumerate() {
+                    *length_cell = extract_data
+                        .next()
+                        .ok_or(ExtractDataError::MissingByteForLength { index })?;
+                }
+                let length = i128::from_be_bytes(length) as usize;
+                let mut output = Vec::with_capacity(length);
+                for index in 0..length {
+                    output.push(
+                        extract_data
+                            .next()
+                            .ok_or(ExtractDataError::MissingDataBytes { index, length })?,
                     );
-                let length = i128::from_be_bytes([
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                    m.next().unwrap(),
-                ]) as usize;
-                m.take(length).collect::<Vec<_>>()
-            },
+                }
+                Ok(output)
+            }
         }
     }
 }
@@ -236,36 +271,55 @@ pub struct Rgba8Image {
 
 #[derive(thiserror::Error, Debug)]
 pub enum LoadFromFileError {
-    #[error("")]
+    #[error("Could not read file: {0}")]
     ReadFile(#[source] std::io::Error),
-    #[error("")]
+    #[error("Unknown file format")]
     UnknownFormat,
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum LoadFromFileWithFormatError {
-    #[error("")]
+    #[error("Could not read file: {0}")]
     ReadFile(#[source] std::io::Error),
-    #[error("")]
+    #[error("Loading file failed: {0}")]
     LoadFailed(#[source] LoadFromMemoryWithFormatError),
 }
 
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum LoadFromMemoryError {
-    #[error("")]
+    #[error("Unknown format")]
     UnknownFormat,
 }
 
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum LoadFromMemoryWithFormatError {
-    #[error("")]
+    #[error("Could not decode WebP data")]
     DecodeWebP,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum SaveToFileError {
+    #[error("Saving file failed: {0}")]
+    SaveFailed(#[source] SaveToMemoryError),
+    #[error("Could not save file: {0}")]
+    WriteFile(#[source] std::io::Error),
+}
+
+#[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum SaveToMemoryError {}
+
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum InsertDataError {
-    #[error("")]
+    #[error("Data exceeds maximum available capacity")]
     DataExceedsCapacity,
+}
+
+#[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum ExtractDataError {
+    #[error("Missing byte at index {index} for length information")]
+    MissingByteForLength { index: usize },
+    #[error("Missing data byte at index {index} and the remaining of full length of {length}")]
+    MissingDataBytes { index: usize, length: usize },
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
@@ -352,7 +406,7 @@ impl CountOfLeastSignificantBits {
 
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum TryFromBitCountError {
-    #[error("")]
+    #[error("'{0}' is not valid for count of least significant bits")]
     Unknown(usize),
 }
 
